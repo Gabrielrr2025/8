@@ -1,0 +1,144 @@
+
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Fundo ANBIMA - Formulário Completo</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        table, th, td { border: 1px solid #999; border-collapse: collapse; padding: 8px; }
+        th { background-color: #f0f0f0; }
+        input, textarea { width: 100%; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <h1>📄 Fundo ANBIMA + Exportações + Formulário</h1>
+    <input type="file" id="upload" accept=".xml"><br><br>
+    <pre id="output">Carregue um XML...</pre>
+
+    <h2>📊 Ativos da Carteira</h2>
+    <table id="tabelaAtivos"><thead><tr><th>Nome</th><th>Tipo</th><th>Valor</th><th>% PL</th></tr></thead><tbody></tbody></table>
+
+    <button onclick="exportarExcel()">📥 Excel</button>
+    <button onclick="exportarPDF()">📥 PDF</button>
+    <button onclick="baixarFormulario()">📥 Baixar Formulário</button>
+
+    <h2>📋 Informe Perfil Mensal</h2>
+    <form id="formulario">
+        CNPJ do fundo: <input id="campoCNPJ"><br>
+        Nome do fundo: <input id="campoNome"><br>
+        VaR (1 dia, % PL): <input id="campoVAR" value="1.5"><br>
+        Modelo utilizado: <input id="campoModelo" value="Histórico"><br>
+        Fatores de risco predominantes: <input id="campoRisco" value="Selic, Dólar, Bolsa"><br>
+        Assembleias realizadas: <input id="campoAss"><br>
+        Justificativas e observações: <textarea id="campoObs"></textarea><br>
+    </form>
+
+    <canvas id="graficoTipo" width="400" height="200"></canvas>
+
+    <script>
+    let dadosAtivos = [], nomeFundo = "", cnpjFundo = "", plFundo = 0;
+
+    function exportarExcel() {
+        const ws = XLSX.utils.json_to_sheet(dadosAtivos);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Ativos");
+        XLSX.writeFile(wb, nomeFundo + "_analise.xlsx");
+    }
+
+    function exportarPDF() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.setFontSize(12);
+        doc.text("Relatório do Fundo: " + nomeFundo, 10, 10);
+        let y = 20;
+        dadosAtivos.forEach(a => {
+            doc.text(`• ${a.Nome} | ${a.Tipo} | R$ ${a.Valor.toFixed(2)} | ${a.Percentual}%`, 10, y);
+            y += 8;
+        });
+        doc.save(nomeFundo + "_relatorio.pdf");
+    }
+
+    function baixarFormulario() {
+        const cnpj = document.getElementById("campoCNPJ").value;
+        const nome = document.getElementById("campoNome").value;
+        const var1 = document.getElementById("campoVAR").value;
+        const modelo = document.getElementById("campoModelo").value;
+        const risco = document.getElementById("campoRisco").value;
+        const ass = document.getElementById("campoAss").value;
+        const obs = document.getElementById("campoObs").value;
+
+        const texto = `CNPJ: ${cnpj}\nNome: ${nome}\nVaR 1 dia: ${var1}%\nModelo: ${modelo}\nFatores de risco: ${risco}\nAssembleias: ${ass}\nObservações: ${obs}`;
+        const blob = new Blob([texto], { type: "text/plain;charset=utf-8" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = nome + "_formulario.txt";
+        link.click();
+    }
+
+    document.getElementById('upload').addEventListener('change', function (e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function (evt) {
+            const text = evt.target.result;
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(text, "application/xml");
+
+            const ns = "urn:iso:std:iso:20022:tech:xsd:semt.003.001.04";
+            nomeFundo = xmlDoc.getElementsByTagNameNS(ns, "Desc")[0]?.textContent || "-";
+            cnpjFundo = xmlDoc.getElementsByTagNameNS(ns, "Id")[1]?.textContent || "-";
+            const pl = parseFloat(xmlDoc.getElementsByTagNameNS(ns, "TtlHldgsValOfStmt")[0]
+                    ?.getElementsByTagNameNS(ns, "Amt")[0]?.textContent || "0");
+            plFundo = pl;
+
+            document.getElementById("campoNome").value = nomeFundo;
+            document.getElementById("campoCNPJ").value = cnpjFundo;
+
+            document.getElementById("output").textContent =
+                "📄 Fundo: " + nomeFundo + "\n" +
+                "🆔 CNPJ: " + cnpjFundo + "\n" +
+                "💰 PL: R$ " + pl.toFixed(2) + "\n" +
+                "Estresse:\n• Selic +1%: -" + (pl * 0.015).toFixed(2) +
+                "\n• Dólar +10%: -" + (pl * 0.01).toFixed(2) +
+                "\n• Bolsa -10%: -" + (pl * 0.05).toFixed(2);
+
+            const ativos = xmlDoc.getElementsByTagNameNS(ns, "BalForSubAcct");
+            const tbody = document.querySelector("#tabelaAtivos tbody");
+            tbody.innerHTML = "";
+            dadosAtivos = [];
+            const tipoMap = {};
+
+            for (let ativo of ativos) {
+                const nome = ativo.getElementsByTagNameNS(ns, "Desc")[0]?.textContent || "-";
+                const tipo = ativo.getElementsByTagNameNS(ns, "OthrId")[0]?.getElementsByTagNameNS(ns, "Id")[0]?.textContent || "-";
+                const val = parseFloat(ativo.getElementsByTagNameNS(ns, "AcctBaseCcyAmts")[0]
+                    ?.getElementsByTagNameNS(ns, "Amt")[0]?.textContent || "0");
+                const perc = ((val / pl) * 100).toFixed(2);
+
+                tbody.innerHTML += `<tr><td>${nome}</td><td>${tipo}</td><td>${val.toFixed(2)}</td><td>${perc}%</td>`;
+                dadosAtivos.push({ Nome: nome, Tipo: tipo, Valor: val, Percentual: perc });
+
+                tipoMap[tipo] = (tipoMap[tipo] || 0) + val;
+            }
+
+            const ctx = document.getElementById('graficoTipo').getContext('2d');
+            new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(tipoMap),
+                    datasets: [{
+                        data: Object.values(tipoMap),
+                        backgroundColor: ['#f88', '#8f8', '#88f', '#ff8', '#8ff', '#f8f']
+                    }]
+                }
+            });
+        };
+        reader.readAsText(file);
+    });
+    </script>
+</body>
+</html>
