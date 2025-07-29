@@ -1,0 +1,97 @@
+
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Fundo ANBIMA - Leitor Avançado</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        table, th, td { border: 1px solid #999; border-collapse: collapse; padding: 8px; }
+        th { background-color: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Leitor de Fundo ANBIMA 5.0 - Avançado</h1>
+    <input type="file" id="upload" accept=".xml"><br><br>
+    <pre id="output">📂 Carregue o XML do fundo...</pre>
+
+    <h2>📊 Ativos da Carteira</h2>
+    <table id="tabelaAtivos">
+        <thead><tr><th>Nome</th><th>Tipo</th><th>Valor de Mercado (R$)</th><th>% sobre PL</th></tr></thead>
+        <tbody></tbody>
+    </table>
+
+    <h2>🧩 Composição por Tipo</h2>
+    <canvas id="graficoTipo" width="400" height="200"></canvas>
+
+    <script>
+    document.getElementById('upload').addEventListener('change', function (e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function (evt) {
+            const text = evt.target.result;
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(text, "application/xml");
+
+            const ns = "urn:iso:std:iso:20022:tech:xsd:semt.003.001.04";
+
+            const nome = xmlDoc.getElementsByTagNameNS(ns, "Desc")[0]?.textContent || "Não encontrado";
+            const cnpjs = xmlDoc.getElementsByTagNameNS(ns, "Id");
+            const cnpj = cnpjs.length > 1 ? cnpjs[1].textContent : "Não encontrado";
+            const plTag = xmlDoc.getElementsByTagNameNS(ns, "TtlHldgsValOfStmt")[0];
+            const pl = plTag?.getElementsByTagNameNS(ns, "Amt")[0]?.textContent || "0";
+            const plNum = parseFloat(pl);
+
+            document.getElementById("output").textContent =
+                "📄 Nome do Fundo: " + nome + "\n" +
+                "🆔 CNPJ: " + cnpj + "\n" +
+                "💰 Patrimônio Líquido: R$ " + pl + "\n\n" +
+                "✅ Estresse (simulado):\n" +
+                "• Selic +1%: R$ -" + (plNum * 0.015).toFixed(2) + "\n" +
+                "• Dólar +10%: R$ -" + (plNum * 0.01).toFixed(2) + "\n" +
+                "• Bolsa -10%: R$ -" + (plNum * 0.05).toFixed(2);
+
+            const ativos = xmlDoc.getElementsByTagNameNS(ns, "BalForSubAcct");
+            const tbody = document.querySelector("#tabelaAtivos tbody");
+            tbody.innerHTML = "";
+            const tipoMap = {};
+
+            for (let ativo of ativos) {
+                const nome = ativo.getElementsByTagNameNS(ns, "Desc")[0]?.textContent || "-";
+                const tipo = ativo.getElementsByTagNameNS(ns, "OthrId")[0]?.getElementsByTagNameNS(ns, "Id")[0]?.textContent || "-";
+                const valTag = ativo.getElementsByTagNameNS(ns, "AcctBaseCcyAmts")[0];
+                const val = parseFloat(valTag?.getElementsByTagNameNS(ns, "Amt")[0]?.textContent || "0");
+                const perc = ((val / plNum) * 100).toFixed(2);
+
+                // Add to table
+                const row = document.createElement("tr");
+                row.innerHTML = `<td>${nome}</td><td>${tipo}</td><td>${val.toFixed(2)}</td><td>${perc}%</td>`;
+                tbody.appendChild(row);
+
+                // Group by type
+                tipoMap[tipo] = (tipoMap[tipo] || 0) + val;
+            }
+
+            // Chart
+            const ctx = document.getElementById('graficoTipo').getContext('2d');
+            const tipos = Object.keys(tipoMap);
+            const valores = tipos.map(k => tipoMap[k]);
+
+            new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: tipos,
+                    datasets: [{
+                        data: valores,
+                        backgroundColor: ['#f88', '#8f8', '#88f', '#ff8', '#8ff', '#f8f']
+                    }]
+                }
+            });
+        };
+        reader.readAsText(file);
+    });
+    </script>
+</body>
+</html>
